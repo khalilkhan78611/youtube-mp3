@@ -7,6 +7,7 @@ import re
 import subprocess
 import shutil
 import logging
+import yt_dlp  # Using the Python package instead of the executable
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -24,83 +25,51 @@ TEMP_DIR = "temp_downloads"
 if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
 
-# Use the local yt-dlp.exe in the same directory
-YT_DLP_PATH = os.path.join(os.getcwd(), "yt-dlp.exe")
-
 def sanitize_filename(title):
     """Remove invalid characters from filename"""
     return re.sub(r'[\\/*?:"<>|]', "", title)
 
 def download_with_yt_dlp(youtube_url):
-    """Download audio using local yt-dlp.exe"""
+    """Download audio using yt-dlp Python package"""
     try:
-        # Check if yt-dlp.exe exists
-        if not os.path.exists(YT_DLP_PATH):
-            raise Exception(f"yt-dlp.exe not found at {YT_DLP_PATH}")
-        
         # Generate a unique filename base (without extension)
         file_id = str(uuid.uuid4())
         output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
         
-        # Use yt-dlp to download the audio
-        command = f'"{YT_DLP_PATH}" -v -x --audio-format mp3 --audio-quality 0 -o "{output_template}" "{youtube_url}"'
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_template,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'quiet': False,
+            'no_warnings': False,
+            'logger': logger,
+        }
         
-        logger.info(f"Running yt-dlp command: {command}")
+        logger.info(f"Attempting download with yt-dlp: {youtube_url}")
         
-        # Run the command with shell=True for Windows
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            universal_newlines=True
-        )
-        
-        # Log output in real-time
-        stdout, stderr = "", ""
-        for line in process.stdout:
-            logger.debug(f"yt-dlp stdout: {line.strip()}")
-            stdout += line
-        
-        for line in process.stderr:
-            logger.error(f"yt-dlp stderr: {line.strip()}")
-            stderr += line
-        
-        # Wait for process to complete
-        return_code = process.wait()
-        
-        if return_code != 0:
-            logger.error(f"yt-dlp failed with return code {return_code}")
-            logger.error(f"yt-dlp stderr: {stderr}")
-            raise Exception(f"yt-dlp failed: {stderr}")
-        
-        # Find the output file (should be the only file starting with file_id)
-        output_file = None
-        for file in os.listdir(TEMP_DIR):
-            if file.startswith(file_id):
-                output_file = os.path.join(TEMP_DIR, file)
-                break
-        
-        if not output_file:
-            raise Exception("Could not find downloaded file")
-        
-        # Get the video title from yt-dlp
-        title_command = f'"{YT_DLP_PATH}" --get-title "{youtube_url}"'
-        title_result = subprocess.run(title_command, 
-                                     shell=True,
-                                     capture_output=True, 
-                                     text=True)
-        
-        if title_result.returncode == 0:
-            video_title = sanitize_filename(title_result.stdout.strip())
-            # Rename the file to include the video title
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(youtube_url, download=True)
+            video_title = sanitize_filename(info_dict.get('title', file_id))
+            
+            # Find the downloaded file
+            output_file = None
+            for file in os.listdir(TEMP_DIR):
+                if file.startswith(file_id):
+                    output_file = os.path.join(TEMP_DIR, file)
+                    break
+            
+            if not output_file:
+                raise Exception("Could not find downloaded file")
+            
+            # Rename to include the video title
             mp3_file = os.path.join(TEMP_DIR, f"{video_title}.mp3")
             shutil.move(output_file, mp3_file)
+            
             return video_title
-        else:
-            # If we can't get the title, just use the file_id
-            return os.path.basename(output_file).split('.')[0]
             
     except Exception as e:
         logger.error(f"Error in download_with_yt_dlp: {str(e)}")
@@ -145,31 +114,26 @@ def index():
             return render_template('index.html', error="Please enter a YouTube URL")
         
         try:
-            # Check if local yt-dlp.exe exists
-            if os.path.exists(YT_DLP_PATH):
-                try:
-                    # Try yt-dlp first
-                    logger.info(f"Attempting download with local yt-dlp: {YT_DLP_PATH}")
-                    video_title = download_with_yt_dlp(youtube_url)
-                except Exception as e:
-                    logger.warning(f"yt-dlp failed, falling back to pytube: {str(e)}")
-                    # Fall back to pytube if yt-dlp fails
-                    video_title = download_with_pytube(youtube_url)
-            else:
-                # Use pytube if yt-dlp is not found
-                logger.info("Local yt-dlp.exe not found, using pytube")
-                video_title = download_with_pytube(youtube_url)
+            # Try yt-dlp first (Python package)
+            logger.info("Attempting download with yt-dlp Python package")
+            video_title = download_with_yt_dlp(youtube_url)
             
-            # Redirect to the download page
-            return redirect(url_for('download', filename=f"{video_title}.mp3"))
-            
-        except RegexMatchError:
-            return render_template('index.html', error="Invalid YouTube URL. Please check the URL and try again.")
-        except VideoUnavailable:
-            return render_template('index.html', error="This video is unavailable. It might be private or age-restricted.")
         except Exception as e:
-            logger.error(f"Error: {str(e)}")
-            return render_template('index.html', error=f"An error occurred: {str(e)}")
+            logger.warning(f"yt-dlp failed, falling back to pytube: {str(e)}")
+            try:
+                # Fall back to pytube if yt-dlp fails
+                video_title = download_with_pytube(youtube_url)
+            except Exception as e:
+                logger.error(f"Error: {str(e)}")
+                if isinstance(e, RegexMatchError):
+                    return render_template('index.html', error="Invalid YouTube URL. Please check the URL and try again.")
+                elif isinstance(e, VideoUnavailable):
+                    return render_template('index.html', error="This video is unavailable. It might be private or age-restricted.")
+                else:
+                    return render_template('index.html', error=f"An error occurred: {str(e)}")
+        
+        # Redirect to the download page
+        return redirect(url_for('download', filename=f"{video_title}.mp3"))
     
     return render_template('index.html')
 
@@ -184,19 +148,22 @@ def download(filename):
 @app.route('/about')
 def about():
     return render_template('about.html')
+
 @app.route('/health')
 def health():
     return {"status": "healthy"}, 200
+
 if __name__ == '__main__':
     # Log system information
     logger.info(f"Current directory: {os.getcwd()}")
-    logger.info(f"Looking for yt-dlp.exe at: {YT_DLP_PATH}")
+    logger.info("Starting application with yt-dlp Python package")
     
-    # Check for local yt-dlp.exe at startup
-    if os.path.exists(YT_DLP_PATH):
-        logger.info(f"Local yt-dlp.exe found at: {YT_DLP_PATH}")
-    else:
-        logger.warning("Local yt-dlp.exe not found. Will use pytube as fallback.")
-        logger.info("To use yt-dlp, download yt-dlp.exe from GitHub and place it in the same directory as this script.")
+    # Check for ffmpeg (required for audio conversion)
+    try:
+        subprocess.run(['ffmpeg', '-version'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        logger.info("ffmpeg is available")
+    except Exception as e:
+        logger.error("ffmpeg is not available. Audio conversion may fail.")
+        logger.error("Install ffmpeg with: sudo apt install ffmpeg")
     
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
