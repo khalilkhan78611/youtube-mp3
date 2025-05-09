@@ -18,11 +18,11 @@ jobs:
         with:
           context: .
           push: false  # Disable registry push
-          tags: youtube-mp3-converter:local-build
+          tags: youtube-mp3:local-build
 
       - name: Save image as artifact
         run: |
-          docker save youtube-mp3-converter:local-build -o image.tar
+          docker save youtube-mp3:local-build -o image.tar
           ls -lh image.tar  # Verify file size
         shell: bash
 
