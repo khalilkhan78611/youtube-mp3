@@ -114,7 +114,26 @@ def check_status(download_id):
 def download(filename):
     mp3_path = os.path.join(TEMP_DIR, filename)
     if os.path.exists(mp3_path):
-        return send_file(mp3_path, as_attachment=True)
+        try:
+            response = send_file(
+                mp3_path,
+                as_attachment=True,
+                download_name=filename,
+                mimetype='audio/mpeg'
+            )
+            
+            @response.call_on_close
+            def cleanup():
+                try:
+                    os.remove(mp3_path)
+                    logger.info(f"Cleaned up file: {filename}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up file {filename}: {str(e)}")
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error sending file {filename}: {str(e)}")
+            return render_template('index.html', error="Error downloading file")
     return render_template('index.html', error="File not found")
 
 @app.route('/about')
@@ -133,4 +152,4 @@ if __name__ == '__main__':
     except Exception as e:
         logger.error("ffmpeg is not available. Install with: sudo apt install ffmpeg")
     
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
