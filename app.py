@@ -184,7 +184,9 @@ def download(filename):
 @app.route('/about')
 def about():
     return render_template('about.html')
-
+@app.route('/health')
+def health():
+    return {"status": "healthy"}, 200
 if __name__ == '__main__':
     # Log system information
     logger.info(f"Current directory: {os.getcwd()}")
