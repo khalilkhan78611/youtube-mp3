@@ -1,34 +1,24 @@
-name: Docker Build (No Login)
+FROM python:3.9-slim
 
-on:
-  push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+# Install curl and ffmpeg (required for yt_dlp)
+RUN apt-get update && apt-get install -y curl ffmpeg && rm -rf /var/lib/apt/lists/*
 
-jobs:
-  build-and-save:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+# Set working directory
+WORKDIR /app
 
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false  # Disable registry push
-          tags: youtube-mp3:local-build
+# Copy and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-      - name: Save image as artifact
-        run: |
-          docker save youtube-mp3:local-build -o image.tar
-          ls -lh image.tar  # Verify file size
-        shell: bash
+# Copy app code
+COPY . .
 
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: docker-image
-          path: image.tar
-          retention-days: 1
+# Expose port 5001 (your app's port)
+EXPOSE 5001
+
+# Define health check for Coolify
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD curl --fail http://localhost:5001/health || exit 1
+
+# Run the app with gunicorn for production
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--threads", "4", "app:app"]
