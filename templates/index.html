@@ -30,6 +30,7 @@
                 e.preventDefault();
                 $('#statusMessage').show();
                 $('#statusText').text('Please wait while downloading...');
+                $('#progress').css('width', '0%').css('background-color', '#34a853');
                 
                 $.post('/start_download', $(this).serialize(), function(response) {
                     if (response.error) {
@@ -37,6 +38,9 @@
                         return;
                     }
                     checkStatus(response.download_id);
+                }).fail(function() {
+                    $('#statusText').text('Error starting download');
+                    $('#progress').css('background-color', '#ea4335');
                 });
             });
             
@@ -44,15 +48,36 @@
                 $.get('/check_status/' + downloadId, function(response) {
                     if (response.status === 'downloading') {
                         $('#statusText').text(response.message);
+                        const percent = parseInt(response.message.match(/\d+/)?.[0] || 0);
+                        $('#progress').css('width', percent + '%');
                         setTimeout(() => checkStatus(downloadId), 1000);
                     } 
                     else if (response.status === 'completed') {
-                        $('#statusText').text('Download complete! Redirecting...');
-                        window.location.href = '/download/' + response.filename;
+                        $('#statusText').text('Download complete! Starting download...');
+                        $('#progress').css('width', '100%');
+                        
+                        // Create hidden link and click it to trigger download
+                        const link = document.createElement('a');
+                        link.href = '/download/' + response.filename;
+                        link.download = response.filename;
+                        link.style.display = 'none';
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        
+                        // Reset form after delay
+                        setTimeout(() => {
+                            $('#statusMessage').hide();
+                            $('#downloadForm')[0].reset();
+                        }, 3000);
                     }
                     else if (response.status === 'error') {
                         $('#statusText').text('Error: ' + response.message);
+                        $('#progress').css('background-color', '#ea4335');
                     }
+                }).fail(function() {
+                    $('#statusText').text('Error checking status');
+                    $('#progress').css('background-color', '#ea4335');
                 });
             }
         });
