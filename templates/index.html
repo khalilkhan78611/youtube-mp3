@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube to MP3 Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>YouTube to MP3 Downloader</h1>
+            <p class="subtitle">Extract audio from YouTube videos for personal use</p>
+        </header>
+        
+        <main>
+            <div class="form-container">
+                <form method="POST" action="/">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            name="youtube_url" 
+                            placeholder="Enter YouTube URL (e.g., https://www.youtube.com/watch?v=...)" 
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="download-btn">Convert to MP3</button>
+                </form>
+            </div>
+            
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="instructions">
+                <h2>How to use:</h2>
+                <ol>
+                    <li>Copy a YouTube video URL</li>
+                    <li>Paste it in the input field above</li>
+                    <li>Click "Convert to MP3"</li>
+                    <li>Wait for processing</li>
+                    <li>Download your MP3 file</li>
+                </ol>
+            </div>
+            
+            <div class="disclaimer">
+                <p><strong>Note:</strong> This tool is for personal use only. Please respect copyright laws and YouTube's Terms of Service.</p>
+            </div>
+        </main>
+        
+        <footer>
+            <p><a href="{{ url_for('about') }}">About</a> | For educational purposes only</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About - YouTube to MP3 Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>About This Tool</h1>
+        </header>
+        
+        <main>
+            <div class="about-content">
+                <h2>YouTube to MP3 Downloader</h2>
+                <p>This is a simple web application built with Python and Flask that allows you to extract audio from YouTube videos and download them as MP3 files.</p>
+                
+                <h3>Technologies Used</h3>
+                <ul>
+                    <li>Python</li>
+                    <li>Flask (Web Framework)</li>
+                    <li>pytube (YouTube downloading library)</li>
+                    <li>pydub (Audio processing)</li>
+                </ul>
+                
+                <h3>Legal Disclaimer</h3>
+                <p>This tool is provided for educational and personal use only. Please be aware that:</p>
+                <ul>
+                    <li>Downloading copyrighted content without permission may violate copyright laws</li>
+                    <li>YouTube's Terms of Service restrict downloading content from their platform</li>
+                    <li>You should only download videos that you have the right to download</li>
+                </ul>
+                
+                <p>The creator of this tool is not responsible for any misuse or legal consequences resulting from the use of this application.</p>
+                
+                <div class="back-link">
+                    <a href="{{ url_for('index') }}">Back to Downloader</a>
+                </div>
+            </div>
+        </main>
+        
+        <footer>
+            <p>For educational purposes only</p>
+        </footer>
+    </div>
+</body>
+</html>
