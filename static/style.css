@@ -1,171 +1,70 @@
-* {
+body {
+    font-family: Arial, sans-serif;
     margin: 0;
     padding: 0;
-    box-sizing: border-box;
-}
-
-body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-    color: #333;
     background-color: #f5f5f5;
 }
 
 .container {
     max-width: 800px;
-    margin: 0 auto;
+    margin: 50px auto;
     padding: 20px;
-}
-
-header {
-    text-align: center;
-    margin-bottom: 30px;
-    padding: 20px 0;
-    border-bottom: 1px solid #eee;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
 }
 
 h1 {
-    color: #e74c3c;
-    margin-bottom: 10px;
+    text-align: center;
+    color: #333;
 }
 
-.subtitle {
-    color: #7f8c8d;
-    font-size: 1.1rem;
-}
-
-.form-container {
-    background-color: white;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    margin-bottom: 30px;
-}
-
-.input-group {
-    margin-bottom: 20px;
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
 }
 
 input[type="text"] {
-    width: 100%;
-    padding: 12px 15px;
+    padding: 10px;
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 16px;
-    transition: border-color 0.3s;
 }
 
-input[type="text"]:focus {
-    border-color: #e74c3c;
-    outline: none;
-}
-
-.download-btn {
-    background-color: #e74c3c;
+button {
+    padding: 10px 15px;
+    background-color: #4285f4;
     color: white;
     border: none;
-    padding: 12px 20px;
     border-radius: 4px;
     cursor: pointer;
     font-size: 16px;
-    width: 100%;
-    transition: background-color 0.3s;
 }
 
-.download-btn:hover {
-    background-color: #c0392b;
+button:hover {
+    background-color: #3367d6;
 }
 
-.error-message {
-    background-color: #f8d7da;
-    color: #721c24;
-    padding: 12px;
-    border-radius: 4px;
-    margin-bottom: 20px;
-    border: 1px solid #f5c6cb;
-}
-
-.instructions {
-    background-color: white;
-    padding: 20px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-    margin-bottom: 30px;
-}
-
-.instructions h2 {
-    margin-bottom: 15px;
-    color: #2c3e50;
-}
-
-.instructions ol {
-    padding-left: 20px;
-}
-
-.instructions li {
-    margin-bottom: 10px;
-}
-
-.disclaimer {
-    background-color: #f8f9fa;
+#statusMessage {
+    margin-top: 20px;
     padding: 15px;
     border-radius: 4px;
-    border-left: 4px solid #e74c3c;
-    margin-bottom: 30px;
+    background-color: #f8f9fa;
+    display: none;
 }
 
-footer {
-    text-align: center;
-    padding: 20px 0;
-    color: #7f8c8d;
-    border-top: 1px solid #eee;
-}
-
-footer a {
-    color: #e74c3c;
-    text-decoration: none;
-}
-
-footer a:hover {
-    text-decoration: underline;
-}
-
-/* About page styles */
-.about-content {
-    background-color: white;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-}
-
-.about-content h2, .about-content h3 {
-    color: #2c3e50;
-    margin-bottom: 15px;
-    margin-top: 25px;
-}
-
-.about-content p, .about-content ul {
-    margin-bottom: 20px;
-}
-
-.about-content ul {
-    padding-left: 20px;
-}
-
-.back-link {
-    margin-top: 30px;
-}
-
-.back-link a {
-    display: inline-block;
-    background-color: #e74c3c;
-    color: white;
-    padding: 10px 15px;
+#progressBar {
+    width: 100%;
+    background-color: #e0e0e0;
     border-radius: 4px;
-    text-decoration: none;
-    transition: background-color 0.3s;
+    margin-top: 10px;
 }
 
-.back-link a:hover {
-    background-color: #c0392b;
+#progress {
+    height: 20px;
+    width: 0%;
+    background-color: #34a853;
+    border-radius: 4px;
+    transition: width 0.3s;
 }
