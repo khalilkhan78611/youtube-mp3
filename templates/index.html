@@ -2,25 +2,30 @@
 <html>
 <head>
     <title>YouTube to MP3 Downloader</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
 </head>
 <body>
-    <h1>YouTube to MP3 Downloader</h1>
-    
-    <form id="downloadForm">
-        <input type="text" name="youtube_url" placeholder="Enter YouTube URL" required>
-        <button type="submit">Download</button>
-    </form>
-    
-    <div id="statusMessage" style="margin-top: 20px; display: none;">
-        <p id="statusText">Please wait while downloading...</p>
-        <div id="progressBar" style="width: 100%; background-color: #ddd; margin-top: 10px;">
-            <div id="progress" style="height: 20px; width: 0%; background-color: #4CAF50;"></div>
+    <div class="container">
+        <h1>YouTube to MP3 Downloader</h1>
+        
+        <form id="downloadForm">
+            <input type="text" name="youtube_url" placeholder="Enter YouTube URL" required>
+            <button type="submit">Download</button>
+        </form>
+        
+        <div id="statusMessage">
+            <p id="statusText"></p>
+            <div id="progressBar">
+                <div id="progress"></div>
+            </div>
         </div>
     </div>
-    
+
     <script>
         $(document).ready(function() {
+            $('#statusMessage').hide();
+            
             $('#downloadForm').submit(function(e) {
                 e.preventDefault();
                 $('#statusMessage').show();
@@ -31,9 +36,7 @@
                         alert(response.error);
                         return;
                     }
-                    
-                    const downloadId = response.download_id;
-                    checkStatus(downloadId);
+                    checkStatus(response.download_id);
                 });
             });
             
