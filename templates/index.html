@@ -4,13 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Downloader</title>
-    <link rel="stylesheet" href="/static/style.css">
     <style>
-        .container {
+        body {
+            font-family: Arial, sans-serif;
             max-width: 600px;
             margin: 0 auto;
             padding: 20px;
-            text-align: center;
         }
         #download-form {
             display: flex;
@@ -20,76 +19,79 @@
         #youtube_url {
             flex: 1;
             padding: 10px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
         }
         button {
             padding: 10px 20px;
-            background-color: #ff0000;
+            background: #ff0000;
             color: white;
             border: none;
-            border-radius: 4px;
             cursor: pointer;
         }
-        button:hover {
-            background-color: #cc0000;
-        }
         #status {
+            margin: 20px 0;
+            min-height: 60px;
+        }
+        #download-link {
+            display: none;
             margin-top: 20px;
             padding: 10px;
+            background: #4CAF50;
+            color: white;
+            text-decoration: none;
             border-radius: 4px;
         }
-        .progress {
-            margin-top: 10px;
+        .progress-container {
+            margin: 10px 0;
             height: 20px;
-            background-color: #f0f0f0;
+            background: #f0f0f0;
             border-radius: 4px;
             overflow: hidden;
         }
         .progress-bar {
             height: 100%;
-            background-color: #4CAF50;
+            background: #4CAF50;
             width: 0%;
             transition: width 0.3s;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>YouTube to MP3 Downloader</h1>
-        <form id="download-form">
-            <input type="text" id="youtube_url" placeholder="Enter YouTube URL" required>
-            <button type="submit">Download</button>
-        </form>
-        <div id="status">Ready to download</div>
-        <div class="progress" id="progress-container" style="display: none;">
-            <div class="progress-bar" id="progress-bar"></div>
-        </div>
+    <h1>YouTube to MP3 Downloader</h1>
+    <form id="download-form">
+        <input type="text" id="youtube_url" placeholder="Enter YouTube URL" required>
+        <button type="submit">Convert</button>
+    </form>
+    
+    <div id="status">Enter a YouTube URL and click Convert</div>
+    <div class="progress-container">
+        <div class="progress-bar" id="progress-bar"></div>
     </div>
+    <a id="download-link" href="#" download>Download MP3</a>
 
     <script>
-        document.getElementById('download-form').addEventListener('submit', async (e) => {
+        const form = document.getElementById('download-form');
+        const statusDiv = document.getElementById('status');
+        const progressBar = document.getElementById('progress-bar');
+        const downloadLink = document.getElementById('download-link');
+
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const url = document.getElementById('youtube_url').value.trim();
-            const statusDiv = document.getElementById('status');
-            const progressContainer = document.getElementById('progress-container');
-            const progressBar = document.getElementById('progress-bar');
             
             if (!url) {
                 statusDiv.textContent = 'Please enter a YouTube URL';
                 return;
             }
 
-            statusDiv.textContent = 'Starting download...';
-            progressContainer.style.display = 'block';
+            // Reset UI
+            statusDiv.textContent = 'Starting conversion...';
             progressBar.style.width = '0%';
+            downloadLink.style.display = 'none';
 
             try {
                 const response = await fetch('/start_download', {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                    },
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: `youtube_url=${encodeURIComponent(url)}`
                 });
                 
@@ -97,50 +99,37 @@
 
                 if (data.error) {
                     statusDiv.textContent = `Error: ${data.error}`;
-                    progressContainer.style.display = 'none';
                     return;
                 }
 
-                checkStatus(data.download_id);
+                pollStatus(data.download_id);
             } catch (error) {
                 statusDiv.textContent = `Error: ${error.message}`;
-                progressContainer.style.display = 'none';
                 console.error('Error:', error);
             }
         });
 
-        async function checkStatus(downloadId) {
-            const statusDiv = document.getElementById('status');
-            const progressBar = document.getElementById('progress-bar');
-            
+        async function pollStatus(downloadId) {
             try {
                 const response = await fetch(`/check_status/${downloadId}`);
                 const data = await response.json();
 
                 if (data.status === 'completed') {
-                    statusDiv.textContent = 'Download complete! Your file will download automatically...';
+                    // Update UI
+                    statusDiv.innerHTML = 'Conversion complete!<br>Click the download button below.';
                     progressBar.style.width = '100%';
                     
-                    // Trigger download
-                    const a = document.createElement('a');
-                    a.href = `/download/${downloadId}`;
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    
-                    // Reset after download
-                    setTimeout(() => {
-                        statusDiv.textContent = 'Ready to download another video';
-                        progressBar.style.width = '0%';
-                        document.getElementById('progress-container').style.display = 'none';
-                    }, 3000);
+                    // Set up download link
+                    downloadLink.href = `/download/${downloadId}`;
+                    downloadLink.download = data.download_filename || 'download.mp3';
+                    downloadLink.textContent = `Download ${data.title || 'your file'}.mp3`;
+                    downloadLink.style.display = 'inline-block';
                     
                 } else if (data.status === 'error') {
                     statusDiv.textContent = `Error: ${data.message}`;
-                    document.getElementById('progress-container').style.display = 'none';
+                    progressBar.style.width = '0%';
                 } else {
-                    // Update progress for downloading status
+                    // Update progress
                     statusDiv.textContent = data.message || 'Processing...';
                     
                     // Extract progress percentage if available
@@ -150,11 +139,10 @@
                     }
                     
                     // Continue polling
-                    setTimeout(() => checkStatus(downloadId), 1000);
+                    setTimeout(() => pollStatus(downloadId), 1000);
                 }
             } catch (error) {
-                statusDiv.textContent = `Error checking status: ${error.message}`;
-                document.getElementById('progress-container').style.display = 'none';
+                statusDiv.textContent = 'Error checking status';
                 console.error('Error:', error);
             }
         }
