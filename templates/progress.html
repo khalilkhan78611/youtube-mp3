@@ -3,218 +3,107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Download Progress - YouTube to MP3 Downloader</title>
+    <title>Download Progress</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
         .progress-container {
-            margin: 30px 0;
+            margin: 20px auto;
+            max-width: 600px;
+            text-align: center;
         }
         .progress-bar {
-            height: 20px;
-            background-color: #f3f3f3;
-            border-radius: 10px;
-            margin: 10px 0;
+            height: 30px;
+            background-color: #f0f0f0;
+            border-radius: 15px;
+            margin: 20px 0;
             overflow: hidden;
         }
-        .progress-bar-fill {
+        .progress-fill {
             height: 100%;
-            background-color: #e74c3c;
-            border-radius: 10px;
-            width: 0%;
-            transition: width 0.5s ease;
+            background-color: #4CAF50;
+            width: {{ status.progress }}%;
+            transition: width 0.3s ease;
         }
-        .status {
-            font-weight: bold;
-            margin: 10px 0;
-        }
-        .status.completed {
-            color: #27ae60;
-        }
-        .status.error {
-            color: #e74c3c;
+        .status-message {
+            margin: 20px 0;
+            font-size: 1.2em;
         }
         .download-btn {
             display: none;
-        }
-        .spinner {
-            border: 4px solid rgba(0, 0, 0, 0.1);
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            border-left-color: #e74c3c;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            vertical-align: middle;
-            margin-right: 10px;
-        }
-        .wait-message {
-            background-color: #f8f9fa;
-            padding: 15px;
-            border-radius: 4px;
-            border-left: 4px solid #3498db;
-            margin: 20px 0;
-            color: #2c3e50;
-        }
-        .wait-message p {
-            margin: 5px 0;
-        }
-        .wait-message .icon {
-            color: #3498db;
-            margin-right: 8px;
-        }
-        .time-estimate {
-            font-style: italic;
-            color: #7f8c8d;
-            margin-top: 5px;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            margin-top: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 1.2em;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Download Progress</h1>
-            <p class="subtitle">Your audio is being processed</p>
+            <h1>Downloading Your MP3</h1>
         </header>
         
         <main>
             <div class="progress-container">
-                <h2 id="video-title">Processing...</h2>
-                
-                <div class="wait-message" id="wait-message">
-                    <p><span class="icon">ℹ️</span> <strong>Please wait while getting download.</strong></p>
-                    <p>Longer videos may take more time to process. The download will start automatically when ready.</p>
-                    <p class="time-estimate" id="time-estimate">Estimating download time...</p>
+                <div class="status-message" id="status-message">
+                    {{ status.message }}
                 </div>
                 
                 <div class="progress-bar">
-                    <div class="progress-bar-fill" id="progress-fill"></div>
+                    <div class="progress-fill" id="progress-fill"></div>
                 </div>
                 
-                <div class="status" id="status-text">
-                    <span class="spinner"></span> Initializing download...
-                </div>
-                
-                <a href="#" class="download-btn" id="download-btn">Download MP3</a>
-                
-                <div class="error-message" id="error-message" style="display: none;"></div>
-            </div>
-            
-            <div class="back-link">
-                <a href="{{ url_for('index') }}">Back to Downloader</a>
+                <a href="{{ url_for('download', filename=status.filename) if status.filename else '#' }}" 
+                   class="download-btn" 
+                   id="download-btn">
+                    Download MP3
+                </a>
             </div>
         </main>
-        
-        <footer>
-            <p><a href="{{ url_for('about') }}">About</a> | For educational purposes only</p>
-        </footer>
     </div>
-    
+
     <script>
-        const videoId = "{{ video_id }}";
+        const downloadId = "{{ download_id }}";
+        const statusMessage = document.getElementById('status-message');
         const progressFill = document.getElementById('progress-fill');
-        const statusText = document.getElementById('status-text');
-        const videoTitle = document.getElementById('video-title');
         const downloadBtn = document.getElementById('download-btn');
-        const errorMessage = document.getElementById('error-message');
-        const spinner = document.querySelector('.spinner');
-        const waitMessage = document.getElementById('wait-message');
-        const timeEstimate = document.getElementById('time-estimate');
         
-        // Track how long the download has been running
-        let downloadStartTime = Date.now();
-        let longDownloadMessageShown = false;
-        
-        function updateProgress() {
-            fetch(`/api/progress/${videoId}`)
+        function checkProgress() {
+            fetch(`/api/progress/${downloadId}`)
                 .then(response => response.json())
                 .then(data => {
-                    // Update progress bar
-                    progressFill.style.width = `${data.percentage}%`;
+                    // Update progress
+                    progressFill.style.width = `${data.progress}%`;
+                    statusMessage.textContent = data.message;
                     
-                    // Update title if available
-                    if (data.title) {
-                        videoTitle.textContent = data.title;
-                    }
-                    
-                    // Update time estimate if available
-                    if (data.time_estimate) {
-                        timeEstimate.textContent = `Estimated time: ${data.time_estimate}`;
-                    }
-                    
-                    // Check if download is taking a long time
-                    const downloadTime = (Date.now() - downloadStartTime) / 1000; // in seconds
-                    
-                    // Update status based on download state
+                    // Handle completed download
                     if (data.status === 'completed') {
-                        statusText.innerHTML = '<span style="color: #27ae60;">✓</span> Download complete!';
-                        statusText.classList.add('completed');
-                        spinner.style.display = 'none';
-                        waitMessage.style.display = 'none';
-                        
-                        // Show download button
                         downloadBtn.style.display = 'inline-block';
-                        downloadBtn.href = `/download/${data.filename}`;
-                        
-                        // Stop polling
-                        clearInterval(progressInterval);
-                    } 
-                    else if (data.status === 'error') {
-                        statusText.innerHTML = '<span style="color: #e74c3c;">✗</span> Download failed';
-                        statusText.classList.add('error');
-                        spinner.style.display = 'none';
-                        waitMessage.style.display = 'none';
-                        
-                        // Show error message
-                        errorMessage.textContent = data.error || 'An unknown error occurred';
-                        errorMessage.style.display = 'block';
-                        
-                        // Stop polling
-                        clearInterval(progressInterval);
+                        return; // Stop checking
                     }
-                    else if (data.status === 'downloading') {
-                        statusText.innerHTML = `<span class="spinner"></span> Downloading... ${data.percentage.toFixed(1)}%`;
-                        
-                        // If download has progressed beyond initial stages, hide the wait message
-                        if (data.percentage > 10) {
-                            waitMessage.style.display = 'none';
-                        }
-                        // If download is taking a long time but still in early stages, show enhanced wait message
-                        else if (downloadTime > 15 && !longDownloadMessageShown) {
-                            waitMessage.innerHTML = `
-                                <p><span class="icon">⏳</span> <strong>Download in progress...</strong></p>
-                                <p>This video appears to be large or high quality. It may take several minutes to complete.</p>
-                                <p>Please keep this page open until the download finishes.</p>
-                                <p class="time-estimate">Estimated time: ${data.time_estimate || 'a few minutes'}</p>
-                            `;
-                            longDownloadMessageShown = true;
-                        }
+                    
+                    // Handle error
+                    if (data.status === 'error') {
+                        setTimeout(() => {
+                            window.location.href = "/";
+                        }, 3000);
+                        return;
                     }
-                    else if (data.status === 'processing') {
-                        statusText.innerHTML = `<span class="spinner"></span> Processing audio...`;
-                        
-                        // If processing is taking a long time, update the wait message
-                        if (downloadTime > 20 && !longDownloadMessageShown) {
-                            waitMessage.innerHTML = `
-                                <p><span class="icon">⚙️</span> <strong>Processing audio...</strong></p>
-                                <p>Converting the video to MP3 format. This may take a few minutes for longer videos.</p>
-                                <p class="time-estimate">Estimated time: ${data.time_estimate || 'a few minutes'}</p>
-                            `;
-                            longDownloadMessageShown = true;
-                        }
-                    }
+                    
+                    // Continue checking every second
+                    setTimeout(checkProgress, 1000);
                 })
                 .catch(error => {
-                    console.error('Error fetching progress:', error);
+                    console.error('Error checking progress:', error);
+                    setTimeout(checkProgress, 1000);
                 });
         }
         
-        // Update progress immediately and then every second
-        updateProgress();
-        const progressInterval = setInterval(updateProgress, 1000);
+        // Start checking progress
+        checkProgress();
     </script>
 </body>
 </html>
