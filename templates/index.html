@@ -5,6 +5,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Downloader</title>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        #download-form {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        #youtube_url {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #ff0000;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #cc0000;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .progress {
+            margin-top: 10px;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -13,52 +61,101 @@
             <input type="text" id="youtube_url" placeholder="Enter YouTube URL" required>
             <button type="submit">Download</button>
         </form>
-        <div id="status"></div>
+        <div id="status">Ready to download</div>
+        <div class="progress" id="progress-container" style="display: none;">
+            <div class="progress-bar" id="progress-bar"></div>
+        </div>
     </div>
 
     <script>
         document.getElementById('download-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const url = document.getElementById('youtube_url').value;
+            const url = document.getElementById('youtube_url').value.trim();
             const statusDiv = document.getElementById('status');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress-bar');
+            
+            if (!url) {
+                statusDiv.textContent = 'Please enter a YouTube URL';
+                return;
+            }
+
             statusDiv.textContent = 'Starting download...';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
 
             try {
                 const response = await fetch('/start_download', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    headers: { 
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
                     body: `youtube_url=${encodeURIComponent(url)}`
                 });
+                
                 const data = await response.json();
 
                 if (data.error) {
                     statusDiv.textContent = `Error: ${data.error}`;
+                    progressContainer.style.display = 'none';
                     return;
                 }
 
                 checkStatus(data.download_id);
             } catch (error) {
                 statusDiv.textContent = `Error: ${error.message}`;
+                progressContainer.style.display = 'none';
+                console.error('Error:', error);
             }
         });
 
         async function checkStatus(downloadId) {
             const statusDiv = document.getElementById('status');
+            const progressBar = document.getElementById('progress-bar');
+            
             try {
                 const response = await fetch(`/check_status/${downloadId}`);
                 const data = await response.json();
 
                 if (data.status === 'completed') {
-                    statusDiv.textContent = 'Download complete! Starting file download...';
-                    window.location.href = `/download/${data.filename}`;
+                    statusDiv.textContent = 'Download complete! Your file will download automatically...';
+                    progressBar.style.width = '100%';
+                    
+                    // Trigger download
+                    const a = document.createElement('a');
+                    a.href = `/download/${downloadId}`;
+                    a.style.display = 'none';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    
+                    // Reset after download
+                    setTimeout(() => {
+                        statusDiv.textContent = 'Ready to download another video';
+                        progressBar.style.width = '0%';
+                        document.getElementById('progress-container').style.display = 'none';
+                    }, 3000);
+                    
                 } else if (data.status === 'error') {
                     statusDiv.textContent = `Error: ${data.message}`;
+                    document.getElementById('progress-container').style.display = 'none';
                 } else {
+                    // Update progress for downloading status
                     statusDiv.textContent = data.message || 'Processing...';
-                    setTimeout(() => checkStatus(downloadId), 1000); // Poll every second
+                    
+                    // Extract progress percentage if available
+                    const percentMatch = data.message?.match(/(\d+)%/);
+                    if (percentMatch) {
+                        progressBar.style.width = percentMatch[0];
+                    }
+                    
+                    // Continue polling
+                    setTimeout(() => checkStatus(downloadId), 1000);
                 }
             } catch (error) {
-                statusDiv.textContent = `Error: ${error.message}`;
+                statusDiv.textContent = `Error checking status: ${error.message}`;
+                document.getElementById('progress-container').style.display = 'none';
+                console.error('Error:', error);
             }
         }
     </script>
