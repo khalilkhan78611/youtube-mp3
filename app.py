@@ -160,30 +160,27 @@ def download_with_yt_dlp(youtube_url, download_id):
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        # Get the YouTube URL from the form
         youtube_url = request.form.get('youtube_url')
-        
         if not youtube_url:
             return render_template('index.html', error="Please enter a YouTube URL")
-        
         try:
-            # Check if yt-dlp is available
-            try:
-                subprocess.run([YT_DLP_CMD, '--version'], 
-                              check=True,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-                
-                logger.info("Using system yt-dlp for download")
-                download_id = str(uuid.uuid4())
-                
-                # Start download in a separate thread
-                thread = threading.Thread(
-                    target=download_with_yt_dlp,
-                    args=(youtube_url, download_id)
-                thread.start()
-                
-                return redirect(url_for('download_progress', download_id=download_id))
+            subprocess.run([YT_DLP_CMD, '--version'], 
+                          check=True,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+            logger.info("Using system yt-dlp for download")
+            download_id = str(uuid.uuid4())
+            thread = threading.Thread(
+                target=download_with_yt_dlp,
+                args=(youtube_url, download_id)
+            )
+            thread.start()
+            return redirect(url_for('download_progress', download_id=download_id))
+        except Exception as e:
+            logger.error(f"yt-dlp not available: {str(e)}")
+            return render_template('index.html', 
+                                  error="yt-dlp is not installed. Please install it with: sudo apt install yt-dlp")
+    return render_template('index.html')
                 
             except Exception as e:
                 logger.error(f"yt-dlp not available: {str(e)}")
