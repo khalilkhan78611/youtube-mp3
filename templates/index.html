@@ -1,86 +1,66 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Downloader</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
     <div class="container">
         <h1>YouTube to MP3 Downloader</h1>
-        
-        <form id="downloadForm">
-            <input type="text" name="youtube_url" placeholder="Enter YouTube URL" required>
+        <form id="download-form">
+            <input type="text" id="youtube_url" placeholder="Enter YouTube URL" required>
             <button type="submit">Download</button>
         </form>
-        
-        <div id="statusMessage">
-            <p id="statusText"></p>
-            <div id="progressBar">
-                <div id="progress"></div>
-            </div>
-        </div>
+        <div id="status"></div>
     </div>
 
     <script>
-        $(document).ready(function() {
-            $('#statusMessage').hide();
-            
-            $('#downloadForm').submit(function(e) {
-                e.preventDefault();
-                $('#statusMessage').show();
-                $('#statusText').text('Please wait while downloading...');
-                $('#progress').css('width', '0%').css('background-color', '#34a853');
-                
-                $.post('/start_download', $(this).serialize(), function(response) {
-                    if (response.error) {
-                        alert(response.error);
-                        return;
-                    }
-                    checkStatus(response.download_id);
-                }).fail(function() {
-                    $('#statusText').text('Error starting download');
-                    $('#progress').css('background-color', '#ea4335');
+        document.getElementById('download-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('youtube_url').value;
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = 'Starting download...';
+
+            try {
+                const response = await fetch('/start_download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `youtube_url=${encodeURIComponent(url)}`
                 });
-            });
-            
-            function checkStatus(downloadId) {
-                $.get('/check_status/' + downloadId, function(response) {
-                    if (response.status === 'downloading') {
-                        $('#statusText').text(response.message);
-                        const percent = parseInt(response.message.match(/\d+/)?.[0] || 0);
-                        $('#progress').css('width', percent + '%');
-                        setTimeout(() => checkStatus(downloadId), 1000);
-                    } 
-                    else if (response.status === 'completed') {
-                        $('#statusText').text('Download complete! Starting download...');
-                        $('#progress').css('width', '100%');
-                        
-                        // Create hidden link and click it to trigger download
-                        const link = document.createElement('a');
-                        link.href = '/download/' + response.filename;
-                        link.download = response.filename;
-                        link.style.display = 'none';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        
-                        // Reset form after delay
-                        setTimeout(() => {
-                            $('#statusMessage').hide();
-                            $('#downloadForm')[0].reset();
-                        }, 3000);
-                    }
-                    else if (response.status === 'error') {
-                        $('#statusText').text('Error: ' + response.message);
-                        $('#progress').css('background-color', '#ea4335');
-                    }
-                }).fail(function() {
-                    $('#statusText').text('Error checking status');
-                    $('#progress').css('background-color', '#ea4335');
-                });
+                const data = await response.json();
+
+                if (data.error) {
+                    statusDiv.textContent = `Error: ${data.error}`;
+                    return;
+                }
+
+                checkStatus(data.download_id);
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
             }
         });
+
+        async function checkStatus(downloadId) {
+            const statusDiv = document.getElementById('status');
+            try {
+                const response = await fetch(`/check_status/${downloadId}`);
+                const data = await response.json();
+
+                if (data.status === 'completed') {
+                    statusDiv.textContent = 'Download complete! Starting file download...';
+                    window.location.href = `/download/${data.filename}`;
+                } else if (data.status === 'error') {
+                    statusDiv.textContent = `Error: ${data.message}`;
+                } else {
+                    statusDiv.textContent = data.message || 'Processing...';
+                    setTimeout(() => checkStatus(downloadId), 1000); // Poll every second
+                }
+            } catch (error) {
+                statusDiv.textContent = `Error: ${error.message}`;
+            }
+        }
     </script>
 </body>
 </html>
