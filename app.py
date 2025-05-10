@@ -73,6 +73,7 @@ def download_with_yt_dlp(youtube_url, download_id):
             info_dict = ydl.extract_info(youtube_url, download=True)
             video_title = sanitize_filename(info_dict.get('title', file_id))
             
+            # Find the downloaded file
             output_file = None
             for file in os.listdir(TEMP_DIR):
                 if file.startswith(file_id):
@@ -82,13 +83,18 @@ def download_with_yt_dlp(youtube_url, download_id):
             if not output_file:
                 raise Exception("Could not find downloaded file")
             
-            # Append download_id to avoid filename conflicts
-            mp3_file = os.path.join(TEMP_DIR, f"{video_title}_{download_id}.mp3")
-            shutil.move(output_file, mp3_file)
+            # Create final filename (without UUID in the displayed name)
+            final_filename = f"{video_title}.mp3"
+            final_path = os.path.join(TEMP_DIR, f"{file_id}.mp3")
+            
+            # Rename the file to include download_id for tracking, but keep original title for download
+            os.rename(output_file, final_path)
             
             download_status[download_id] = {
                 "status": "completed",
-                "filename": f"{video_title}_{download_id}.mp3",
+                "filepath": final_path,
+                "filename": f"{file_id}.mp3",  # Internal reference
+                "download_filename": final_filename,  # The name user will see
                 "title": video_title
             }
             
@@ -131,10 +137,19 @@ def check_status(download_id):
     status = download_status.get(download_id, {"status": "unknown", "message": "Download ID not found"})
     return jsonify(status)
 
-@app.route('/download/<filename>')
-def download(filename):
+@app.route('/download/<file_id>')
+def download(file_id):
     """Serve the downloaded MP3 file to the browser."""
-    mp3_path = os.path.join(TEMP_DIR, filename)
+    # Security check to prevent directory traversal
+    if '..' in file_id or '/' in file_id:
+        return jsonify({"error": "Invalid file ID"}), 400
+        
+    # Get the download info
+    download_info = download_status.get(file_id)
+    if not download_info or download_info['status'] != 'completed':
+        return jsonify({"error": "File not ready or invalid download ID"}), 404
+    
+    mp3_path = download_info['filepath']
     if not os.path.exists(mp3_path):
         return jsonify({"error": "File not found"}), 404
     
@@ -142,21 +157,13 @@ def download(filename):
         response = send_file(
             mp3_path,
             as_attachment=True,
-            download_name=filename,
+            download_name=download_info['download_filename'],
             mimetype='audio/mpeg'
         )
         
-        @response.call_on_close
-        def cleanup():
-            try:
-                os.remove(mp3_path)
-                logger.info(f"Cleaned up file: {filename}")
-            except Exception as e:
-                logger.error(f"Error cleaning up file {filename}: {str(e)}")
-        
         return response
     except Exception as e:
-        logger.error(f"Error sending file {filename}: {str(e)}")
+        logger.error(f"Error sending file {file_id}: {str(e)}")
         return jsonify({"error": "Error downloading file"}), 500
 
 @app.route('/about')
