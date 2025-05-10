@@ -4,148 +4,55 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Downloader</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        #download-form {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        #youtube_url {
-            flex: 1;
-            padding: 10px;
-        }
-        button {
-            padding: 10px 20px;
-            background: #ff0000;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        #status {
-            margin: 20px 0;
-            min-height: 60px;
-        }
-        #download-link {
-            display: none;
-            margin-top: 20px;
-            padding: 10px;
-            background: #4CAF50;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-        }
-        .progress-container {
-            margin: 10px 0;
-            height: 20px;
-            background: #f0f0f0;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .progress-bar {
-            height: 100%;
-            background: #4CAF50;
-            width: 0%;
-            transition: width 0.3s;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <h1>YouTube to MP3 Downloader</h1>
-    <form id="download-form">
-        <input type="text" id="youtube_url" placeholder="Enter YouTube URL" required>
-        <button type="submit">Convert</button>
-    </form>
-    
-    <div id="status">Enter a YouTube URL and click Convert</div>
-    <div class="progress-container">
-        <div class="progress-bar" id="progress-bar"></div>
-    </div>
-    <a id="download-link" href="#" download>Download MP3</a>
-
-    <script>
-        const form = document.getElementById('download-form');
-        const statusDiv = document.getElementById('status');
-        const progressBar = document.getElementById('progress-bar');
-        const downloadLink = document.getElementById('download-link');
-
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const url = document.getElementById('youtube_url').value.trim();
+    <div class="container">
+        <header>
+            <h1>YouTube to MP3 Downloader</h1>
+            <p class="subtitle">Extract audio from YouTube videos for personal use</p>
+        </header>
+        
+        <main>
+            <div class="form-container">
+                <form method="POST" action="/">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            name="youtube_url" 
+                            placeholder="Enter YouTube URL (e.g., https://www.youtube.com/watch?v=...)" 
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="download-btn">Convert to MP3</button>
+                </form>
+            </div>
             
-            if (!url) {
-                statusDiv.textContent = 'Please enter a YouTube URL';
-                return;
-            }
-
-            // Reset UI
-            statusDiv.textContent = 'Starting conversion...';
-            progressBar.style.width = '0%';
-            downloadLink.style.display = 'none';
-
-            try {
-                const response = await fetch('/start_download', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `youtube_url=${encodeURIComponent(url)}`
-                });
-                
-                const data = await response.json();
-
-                if (data.error) {
-                    statusDiv.textContent = `Error: ${data.error}`;
-                    return;
-                }
-
-                pollStatus(data.download_id);
-            } catch (error) {
-                statusDiv.textContent = `Error: ${error.message}`;
-                console.error('Error:', error);
-            }
-        });
-
-        async function pollStatus(downloadId) {
-            try {
-                const response = await fetch(`/check_status/${downloadId}`);
-                const data = await response.json();
-
-                if (data.status === 'completed') {
-                    // Update UI
-                    statusDiv.innerHTML = 'Conversion complete!<br>Click the download button below.';
-                    progressBar.style.width = '100%';
-                    
-                    // Set up download link
-                    downloadLink.href = `/download/${downloadId}`;
-                    downloadLink.download = data.download_filename || 'download.mp3';
-                    downloadLink.textContent = `Download ${data.title || 'your file'}.mp3`;
-                    downloadLink.style.display = 'inline-block';
-                    
-                } else if (data.status === 'error') {
-                    statusDiv.textContent = `Error: ${data.message}`;
-                    progressBar.style.width = '0%';
-                } else {
-                    // Update progress
-                    statusDiv.textContent = data.message || 'Processing...';
-                    
-                    // Extract progress percentage if available
-                    const percentMatch = data.message?.match(/(\d+)%/);
-                    if (percentMatch) {
-                        progressBar.style.width = percentMatch[0];
-                    }
-                    
-                    // Continue polling
-                    setTimeout(() => pollStatus(downloadId), 1000);
-                }
-            } catch (error) {
-                statusDiv.textContent = 'Error checking status';
-                console.error('Error:', error);
-            }
-        }
-    </script>
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% endif %}
+            
+            <div class="instructions">
+                <h2>How to use:</h2>
+                <ol>
+                    <li>Copy a YouTube video URL</li>
+                    <li>Paste it in the input field above</li>
+                    <li>Click "Convert to MP3"</li>
+                    <li>Wait for processing</li>
+                    <li>Download your MP3 file</li>
+                </ol>
+            </div>
+            
+            <div class="disclaimer">
+                <p><strong>Note:</strong> This tool is for personal use only. Please respect copyright laws and YouTube's Terms of Service.</p>
+            </div>
+        </main>
+        
+        <footer>
+            <p><a href="{{ url_for('about') }}">About</a> | For educational purposes only</p>
+        </footer>
+    </div>
 </body>
 </html>
