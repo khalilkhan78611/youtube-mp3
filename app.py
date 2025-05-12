@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, url_for, redirect, jsonify
+from flask import Flask, render_template, request, send_file, url_for, redirect, jsonify, send_from_directory
 import os
 import uuid
 import re
@@ -18,7 +18,9 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
-
+@app.route('/sw.js')
+def serve_sw():
+    return app.send_static_file('sw.js')
 # Create a temporary directory for downloads if it doesn't exist
 TEMP_DIR = "temp_downloads"
 if not os.path.exists(TEMP_DIR):
