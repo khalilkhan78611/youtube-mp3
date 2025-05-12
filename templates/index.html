@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YouTube to MP3 Converter</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
+   <style>
         body {
             font-family: Arial, sans-serif;
             background-color: #f4f4f4;
@@ -19,10 +19,8 @@
         /* Ad containers - top and bottom */
         .ad-container {
             width: 100%;
-            
             padding: 15px 0;
             text-align: center;
-            border-bottom: 1px solid #ddd;
         }
 
         .ad-top {
@@ -44,17 +42,16 @@
         .ad-left, .ad-right {
             display: none;
             width: 160px;
-            
             padding: 20px 10px;
             text-align: center;
         }
 
         .ad-left {
-            
+            border-right: 1px solid #eee;
         }
 
         .ad-right {
-           
+            border-left: 1px solid #eee;
         }
 
         .container {
