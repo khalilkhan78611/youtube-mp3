@@ -15,11 +15,11 @@ COPY . .
 RUN cp sw.js  /app/static/
 RUN cp sw.js /
 # Copy favicon files to the static root directory
-COPY favicon-96x96.png /app/static/
-COPY favicon.svg /app/static/
-COPY favicon.ico /app/static/
-COPY apple-touch-icon.png /app/static/
-COPY site.webmanifest /app/static/
+COPY favicon-96x96.png /app/
+COPY favicon.svg /app/
+COPY favicon.ico /app/
+COPY apple-touch-icon.png /app/
+COPY site.webmanifest /app/
 # Expose port 5001 (your app's port)
 EXPOSE 5001
 
