@@ -12,15 +12,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
 COPY . .
-COPY . /app
 RUN cp sw.js  /app/static/
 RUN cp sw.js /
 # Copy favicon files to the static root directory
-COPY favicon-96x96.png /
-COPY favicon.svg /
-COPY favicon.ico /
-COPY apple-touch-icon.png /
-COPY site.webmanifest /
+COPY favicon-96x96.png /app/static/
+COPY favicon.svg /app/static/
+COPY favicon.ico /app/static/
+COPY apple-touch-icon.png /app/static/
+COPY site.webmanifest /app/static/
 # Expose port 5001 (your app's port)
 EXPOSE 5001
 
