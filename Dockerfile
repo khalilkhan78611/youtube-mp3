@@ -12,8 +12,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app code
 COPY . .
-RUN cp sw.js google1c17d43b65d2cdda.html /app/static/
-RUN cp sw.js google1c17d43b65d2cdda.html /
+RUN cp sw.js  /app/static/
+RUN cp sw.js /
+RUN cp google1c17d43b65d2cdda.html  /app/static/
+RUN cp google1c17d43b65d2cdda.html /
 # Expose port 5001 (your app's port)
 EXPOSE 5001
 
