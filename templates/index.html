@@ -76,6 +76,16 @@
             margin: 20px 0;
         }
 
+        /* Article container */
+        .article-container {
+            order: 5;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            width: 100%;
+            background: white;
+        }
+
         h1 {
             color: #ff0000;
             margin-bottom: 20px;
@@ -164,9 +174,6 @@
 
         <!-- Main Content -->
         <div class="content">
-            <!-- Include the article -->
-            
-            
             <!-- Converter Tool -->
             <div class="converter-container">
                 <h1>YouTube to MP3 Converter</h1>
@@ -209,6 +216,10 @@
         </script>
         <script type="text/javascript" src="//www.highperformanceformat.com/6886a792f4045a3e812b048adbca67d1/invoke.js"></script>
     </div>
-	{% include 'article.html' %}
+
+    <!-- Article Content (placed after bottom ad) -->
+    <div class="article-container">
+        {% include 'article.html' %}
+    </div>
 </body>
 </html>
