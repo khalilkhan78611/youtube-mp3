@@ -25,9 +25,7 @@ RUN chmod 700 temp_downloads config && \
     chmod 600 config/cookies.txt || true
 EXPOSE 5001
 
-# Define health check for Coolify
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD curl --fail http://localhost:5001/health || exit 1
+
 
 # Run the app with gunicorn for production
 CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--threads", "4", "app:app"]
