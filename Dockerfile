@@ -21,6 +21,8 @@ COPY favicon.ico /app/
 COPY apple-touch-icon.png /app/
 COPY site.webmanifest /app/
 # Expose port 5001 (your app's port)
+RUN chmod 700 temp_downloads config && \
+    chmod 600 config/cookies.txt || true
 EXPOSE 5001
 
 # Define health check for Coolify
