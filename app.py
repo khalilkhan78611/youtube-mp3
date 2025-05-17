@@ -1,238 +1,326 @@
+from flask import Flask, render_template, request, send_file, url_for, redirect, jsonify
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import os
-import random
-import re
-import shutil
-import subprocess
-import time
 import uuid
-from pathvalidate import sanitize_filename
-from typing import Dict, Optional, List
-
-# Configure logging
+import re
+import subprocess
+import shutil
 import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+import threading
+import time
+from urllib.parse import urlparse
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler("app.log"),
+                        logging.StreamHandler()
+                    ])
 logger = logging.getLogger(__name__)
 
-# Global settings
-YT_DLP_CMD = "yt-dlp"
+app = Flask(__name__, static_folder='static', template_folder='templates')
+limiter = Limiter(app, key_func=get_remote_address, default_limits=["200 per day", "50 per hour"])
+
+@app.route('/sw.js')
+def serve_sw():
+    return app.send_static_file('sw.js')
+
+# Create directories
 TEMP_DIR = "temp_downloads"
-COOKIES_FILE = "cookies.txt"
-os.makedirs(TEMP_DIR, exist_ok=True)
+CONFIG_DIR = "config"
+for directory in [TEMP_DIR, CONFIG_DIR]:
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+        os.chmod(directory, 0o700)  # Restrict directory access
 
-# Configuration
-class Config:
-    DELAY_RANGE = (5, 15)  # Random delay between downloads (seconds)
-    MAX_RETRIES = 3        # Max retries for failed downloads
-    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    PROXY = os.environ.get('YT_DLP_PROXY')  # Optional proxy
+# Use system-installed yt-dlp
+YT_DLP_CMD = "yt-dlp"
 
-# Global download tracking
-download_status: Dict[str, dict] = {}
+# Store download progress and status
+download_status = {}
 
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename by removing invalid characters."""
-    return re.sub(r'[\\/*?:"<>|]', "", filename).strip()
+def sanitize_filename(title):
+    """Remove invalid characters from filename"""
+    return re.sub(r'[\\/*?:"<>|]', "", title)
 
-class YouTubeDownloader:
-    def __init__(self):
-        self.cookies_available = os.path.exists(COOKIES_FILE)
-        if self.cookies_available:
-            logger.info("Cookies file found - will use for authentication")
-        else:
-            logger.warning("No cookies.txt file - age-restricted videos may fail")
+def is_valid_youtube_url(url):
+    """Validate YouTube URL"""
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc in ('www.youtube.com', 'youtu.be', 'youtube.com')
+    except Exception:
+        return False
 
-    def _build_command(self, url: str, output_template: str) -> List[str]:
-        """Build the yt-dlp command with all options."""
-        command = [
-            YT_DLP_CMD,
-            '--newline',
-            '--progress',
-            '--no-warnings',
-            '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '--extract-audio',
-            '--user-agent', Config.USER_AGENT,
-            '-o', output_template,
-        ]
-
-        if self.cookies_available:
-            command.extend(['--cookies', COOKIES_FILE])
-
-        if Config.PROXY:
-            command.extend(['--proxy', Config.PROXY])
-
-        command.extend([
-            '--force-ipv4',  # Avoid IPv6 if problematic
-            '--socket-timeout', '30',  # 30 second timeout
-            '--retries', '10',  # Retry on failures
-            url
-        ])
-
-        return command
-
-    def _handle_error(self, download_id: str, error_msg: str) -> None:
-        """Handle different types of download errors."""
-        error_lower = error_msg.lower()
-        
-        if any(msg in error_lower for msg in ["sign in", "robot", "captcha"]):
-            message = "YouTube requires CAPTCHA verification (add cookies.txt)"
-        elif "429" in error_msg or "too many requests" in error_lower:
-            message = "Rate limited - try again later with different IP"
-        elif "unavailable" in error_lower:
-            message = "Video is unavailable/private"
-        elif "age restricted" in error_lower:
-            message = "Age-restricted video (requires cookies)"
-        else:
-            message = "Download failed"
+def download_with_yt_dlp(youtube_url, download_id, cookies_path=None):
+    """Download audio using system yt-dlp"""
+    try:
+        file_id = str(uuid.uuid4())
+        output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
 
         download_status[download_id] = {
-            'status': 'error',
-            'message': message,
-            'error': error_msg,
-            'progress': 0
+            'status': 'downloading',
+            'progress': 0,
+            'message': 'Starting download...',
+            'filename': None
         }
 
-    def _get_video_title(self, url: str) -> Optional[str]:
-        """Get video title without downloading."""
-        try:
-            cmd = [YT_DLP_CMD, '--get-title', '--no-warnings', url]
-            if self.cookies_available:
-                cmd.extend(['--cookies', COOKIES_FILE])
-            
-            result = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=15
-            )
-            return sanitize_filename(result.stdout.strip()) if result.returncode == 0 else None
-        except Exception as e:
-            logger.warning(f"Couldn't get video title: {str(e)}")
-            return None
+        command = [
+            YT_DLP_CMD,
+            '-x',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--newline',
+            '--progress',
+            '-o', output_template,
+            youtube_url
+        ]
 
-    def _process_output_line(self, line: str, download_id: str) -> None:
-        """Parse yt-dlp output for progress updates."""
-        try:
+        # Use static cookies.txt if no user-uploaded cookies provided
+        static_cookies = os.path.join(CONFIG_DIR, "cookies.txt")
+        if cookies_path and os.path.exists(cookies_path):
+            command.extend(['--cookies', cookies_path])
+        elif os.path.exists(static_cookies):
+            command.extend(['--cookies', static_cookies])
+
+        logger.info(f"Running yt-dlp command: {' '.join(command)}")
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            universal_newlines=True,
+            bufsize=1
+        )
+
+        for line in process.stdout:
+            line = line.strip()
+            logger.debug(f"yt-dlp stdout: {line}")
             if '[download]' in line:
                 if 'Destination:' in line:
                     download_status[download_id]['message'] = 'Processing...'
                 elif '%' in line:
-                    percent = float(line.split('%')[0].strip().split()[-1])
-                    download_status[download_id].update({
-                        'progress': percent,
-                        'message': f"Downloading... {percent:.1f}%"
-                    })
-        except Exception as e:
-            logger.debug(f"Progress parsing error: {str(e)}")
+                    try:
+                        percent = float(line.split('%')[0].strip().split()[-1])
+                        download_status[download_id]['progress'] = percent
+                        download_status[download_id]['message'] = f"Downloading... {percent:.1f}%"
+                    except Exception as e:
+                        logger.warning(f"Failed to parse progress: {e}")
 
-    def download(self, youtube_url: str, download_id: str) -> Optional[str]:
-        """Main download method with retry logic."""
-        for attempt in range(Config.MAX_RETRIES):
-            try:
-                # Random delay between attempts
-                if attempt > 0:
-                    delay = random.uniform(*Config.DELAY_RANGE)
-                    logger.info(f"Retry #{attempt + 1} in {delay:.1f} seconds...")
-                    time.sleep(delay)
+        return_code = process.wait()
+        if return_code != 0:
+            error = process.stderr.read()
+            logger.error(f"yt-dlp failed with return code {return_code}")
+            logger.error(f"yt-dlp stderr: {error}")
+            download_status[download_id] = {
+                'status': 'error',
+                'message': f"Download failed: {error}"
+            }
+            return None
 
-                # Initialize tracking
-                file_id = str(uuid.uuid4())
-                output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
-                
-                download_status[download_id] = {
-                    'status': 'downloading',
-                    'progress': 0,
-                    'message': 'Starting download...',
-                    'filename': None,
-                    'attempt': attempt + 1
-                }
+        output_file = None
+        for file in os.listdir(TEMP_DIR):
+            if file.startswith(file_id):
+                output_file = os.path.join(TEMP_DIR, file)
+                break
 
-                # Build and run command
-                command = self._build_command(youtube_url, output_template)
-                logger.debug(f"Running command: {' '.join(command)}")
+        if not output_file:
+            download_status[download_id] = {
+                'status': 'error',
+                'message': "Could not find downloaded file"
+            }
+            return None
 
-                process = subprocess.Popen(
-                    command,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    universal_newlines=True
-                )
+        title_command = [YT_DLP_CMD, '--get-title']
+        if cookies_path and os.path.exists(cookies_path):
+            title_command.extend(['--cookies', cookies_path])
+        elif os.path.exists(static_cookies):
+            title_command.extend(['--cookies', static_cookies])
+        title_command.append(youtube_url)
+        title_result = subprocess.run(title_command,
+                                     capture_output=True,
+                                     text=True)
+        if title_result.returncode == 0:
+            video_title = sanitize_filename(title_result.stdout.strip())
+            mp3_file = os.path.join(TEMP_DIR, f"{video_title}.mp3")
+            shutil.move(output_file, mp3_file)
+            os.chmod(mp3_file, 0o600)  # Restrict file access
+            download_status[download_id] = {
+                'status': 'completed',
+                'progress': 100,
+                'message': 'Download complete!',
+                'filename': f"{video_title}.mp3"
+            }
+            return video_title
+        else:
+            filename = os.path.basename(output_file).split('.')[0] + '.mp3'
+            mp3_file = os.path.join(TEMP_DIR, filename)
+            shutil.move(output_file, mp3_file)
+            os.chmod(mp3_file, 0o600)
+            download_status[download_id] = {
+                'status': 'completed',
+                'progress': 100,
+                'message': 'Download complete!',
+                'filename': filename
+            }
+            return filename
 
-                # Process output in real-time
-                stderr_lines = []
-                while True:
-                    output_line = process.stdout.readline()
-                    if output_line == '' and process.poll() is not None:
-                        break
-                    if output_line:
-                        self._process_output_line(output_line.strip(), download_id)
-
-                    # Capture stderr
-                    stderr_line = process.stderr.readline()
-                    if stderr_line:
-                        stderr_lines.append(stderr_line.strip())
-
-                # Check result
-                if process.returncode != 0:
-                    error_msg = '\n'.join(stderr_lines) or f"Exit code {process.returncode}"
-                    self._handle_error(download_id, error_msg)
-                    continue  # Will retry if attempts remain
-
-                # Find and rename downloaded file
-                downloaded_files = [
-                    f for f in os.listdir(TEMP_DIR) 
-                    if f.startswith(file_id) and f.endswith('.mp3')
-                ]
-
-                if not downloaded_files:
-                    self._handle_error(download_id, "Downloaded file not found")
-                    continue
-
-                temp_file = os.path.join(TEMP_DIR, downloaded_files[0])
-                video_title = self._get_video_title(youtube_url) or f"audio_{file_id[:8]}"
-                final_filename = f"{sanitize_filename(video_title)}.mp3"
-                final_path = os.path.join(TEMP_DIR, final_filename)
-
-                try:
-                    shutil.move(temp_file, final_path)
-                    download_status[download_id] = {
-                        'status': 'completed',
-                        'progress': 100,
-                        'message': 'Download complete!',
-                        'filename': final_filename,
-                        'filepath': final_path
-                    }
-                    return final_filename
-                except OSError as e:
-                    self._handle_error(download_id, f"File move failed: {str(e)}")
-                    continue
-
-            except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}", exc_info=True)
-                self._handle_error(download_id, f"Unexpected error: {str(e)}")
-
-        # All attempts failed
-        logger.error(f"All {Config.MAX_RETRIES} attempts failed for {youtube_url}")
+    except Exception as e:
+        logger.error(f"Error in download_with_yt_dlp: {str(e)}")
+        download_status[download_id] = {
+            'status': 'error',
+            'message': f"Error: {str(e)}"
+        }
         return None
+    finally:
+        if cookies_path and os.path.exists(cookies_path):
+            try:
+                os.remove(cookies_path)
+                logger.info(f"Cleaned up cookies file: {cookies_path}")
+            except Exception as e:
+                logger.error(f"Error cleaning up cookies file: {e}")
 
-# Example usage
-if __name__ == "__main__":
-    downloader = YouTubeDownloader()
-    
-    # Test download
-    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    download_id = "test_download_1"
-    
-    result = downloader.download(test_url, download_id)
-    if result:
-        print(f"Successfully downloaded: {result}")
-        print(f"Final status: {download_status[download_id]}")
+@app.route('/', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
+def index():
+    if request.method == 'POST':
+        youtube_url = request.form.get('youtube_url')
+        cookies_file = request.files.get('cookies_file')
+
+        if not youtube_url:
+            return render_template('index.html', error="Please enter a YouTube URL")
+        if not is_valid_youtube_url(youtube_url):
+            return render_template('index.html', error="Please enter a valid YouTube URL")
+
+        try:
+            subprocess.run([YT_DLP_CMD, '--version'],
+                          check=True,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+            logger.info("Using system yt-dlp for download")
+            download_id = str(uuid.uuid4())
+
+            cookies_path = None
+            if cookies_file and cookies_file.filename:
+                cookies_filename = f"{download_id}_cookies.txt"
+                cookies_path = os.path.join(TEMP_DIR, cookies_filename)
+                cookies_file.save(cookies_path)
+                os.chmod(cookies_path, 0o600)  # Restrict access
+                logger.info(f"Saved user cookies to {cookies_path}")
+
+            thread = threading.Thread(
+                target=download_with_yt_dlp,
+                args=(youtube_url, download_id, cookies_path)
+            )
+            thread.start()
+            return redirect(url_for('download_progress', download_id=download_id))
+        except subprocess.CalledProcessError as e:
+            logger.error(f"yt-dlp not available: {str(e)}")
+            return render_template('index.html',
+                                  error="yt-dlp is not installed. Please install it with: sudo apt install yt-dlp")
+        except Exception as e:
+            logger.error(f"Error: {str(e)}")
+            return render_template('index.html', error=f"An error occurred: {str(e)}")
+
+    return render_template('index.html')
+
+@app.route('/progress/<download_id>')
+def download_progress(download_id):
+    if download_id not in download_status:
+        return render_template('index.html', error="Invalid download ID")
+    status = download_status[download_id]
+    return render_template('progress.html',
+                         download_id=download_id,
+                         status=status)
+
+@app.route('/api/progress/<download_id>')
+def api_progress(download_id):
+    if download_id not in download_status:
+        return jsonify({'error': 'Invalid download ID'}), 404
+    return jsonify(download_status[download_id])
+
+@app.route('/download/<filename>')
+def download(filename):
+    mp3_path = os.path.join(TEMP_DIR, filename)
+    if os.path.exists(mp3_path):
+        try:
+            response = send_file(mp3_path, as_attachment=True)
+            @response.call_on_close
+            def cleanup():
+                try:
+                    os.remove(mp3_path)
+                    logger.info(f"Cleaned up file: {mp3_path}")
+                except Exception as e:
+                    logger.error(f"Error cleaning up file: {e}")
+            return response
+        except Exception as e:
+            logger.error(f"Error sending file: {e}")
+            return render_template('index.html', error="Error downloading file")
     else:
-        print("Download failed")
-        print(f"Error details: {download_status[download_id].get('error')}")
+        return render_template('index.html', error="File not found. Please try again.")
+
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+@app.errorhandler(Exception)
+def handle_error(error):
+    logger.error(f"Unhandled error: {str(error)}")
+    return render_template('index.html', error="An unexpected error occurred. Please try again."), 500
+
+def cleanup_temp_files():
+    """Clean up old files in temp directory"""
+    try:
+        for file in os.listdir(TEMP_DIR):
+            file_path = os.path.join(TEMP_DIR, file)
+            try:
+                if os.path.isfile(file_path) and (file.endswith('.mp3') or file.endswith('_cookies.txt')):
+                    os.remove(file_path)
+                    logger.info(f"Cleaned up temp file: {file_path}")
+            except Exception as e:
+                logger.error(f"Error cleaning up file {file_path}: {e}")
+    except Exception as e:
+        logger.error(f"Error cleaning up temp directory: {e}")
+
+if __name__ == '__main__':
+    # Check for yt-dlp at startup
+    try:
+        version = subprocess.run([YT_DLP_CMD, '--version'],
+                               check=True,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE,
+                               text=True)
+        logger.info(f"Using yt-dlp version: {version.stdout.strip()}")
+    except Exception as e:
+        logger.error("yt-dlp not found. Please install it with: sudo apt install yt-dlp")
+
+    # Ensure cookies.txt has correct permissions if it exists
+    static_cookies = os.path.join(CONFIG_DIR, "cookies.txt")
+    if os.path.exists(static_cookies):
+        os.chmod(static_cookies, 0o600)
+        logger.info("Set permissions for cookies.txt to 600")
+
+    # Register cleanup function
+    import atexit
+    atexit.register(cleanup_temp_files)
+
+    app.run(host='0.0.0.0', port=5001, debug=True)
+
+# SECURITY NOTES:
+# 1. Add config/cookies.txt to .gitignore to avoid committing sensitive data:
+#    echo "config/cookies.txt" >> .gitignore
+# 2. Alternatively, use git-secret to encrypt cookies.txt:
+#    git secret init
+#    git secret tell your.email@example.com
+#    git secret add config/cookies.txt
+#    git secret hide
+# 3. Configure web server to block access to config/:
+#    Nginx: location /config/ { deny all; return 403; }
+#    Apache: <Directory "/path/to/config"> Deny from all </Directory>
+# 4. Ensure temp_downloads/ and config/ have chmod 700, and files have chmod 600.
+# 5. Run setup.sh after cloning to enforce permissions:
+#    # setup.sh
+#    chmod 700 temp_downloads config
+#    chmod 600 config/cookies.txt
