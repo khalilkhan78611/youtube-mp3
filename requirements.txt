@@ -5,3 +5,4 @@ flask==3.0.3
 yt-dlp==2024.10.22
 pytube==15.0.0
 ffmpeg-python==0.2.0
+flask_limiter
