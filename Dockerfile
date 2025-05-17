@@ -1,7 +1,7 @@
 FROM python:3.9-slim
 
 # Install curl and ffmpeg (required for yt_dlp)
-RUN apt-get update && apt-get install -y curl ffmpeg mc && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y wget ffmpeg mc && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
