@@ -18,9 +18,11 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
+
 @app.route('/sw.js')
 def serve_sw():
     return app.send_static_file('sw.js')
+
 # Create a temporary directory for downloads if it doesn't exist
 TEMP_DIR = "temp_downloads"
 if not os.path.exists(TEMP_DIR):
@@ -29,12 +31,31 @@ if not os.path.exists(TEMP_DIR):
 # Use system-installed yt-dlp (Linux version)
 YT_DLP_CMD = "yt-dlp"
 
+# Proxy configuration (set to None if not using a proxy)
+PROXY = os.environ.get('YT_DLP_PROXY', None)  # Load from environment variable, or set to None
+
+# Cookies file path
+COOKIES_FILE = "cookies.txt"
+
 # Store download progress and status
 download_status = {}
 
 def sanitize_filename(title):
     """Remove invalid characters from filename"""
     return re.sub(r'[\\/*?:"<>|]', "", title)
+
+def validate_cookies_file():
+    """Check if cookies file exists and is valid"""
+    if not os.path.exists(COOKIES_FILE):
+        logger.warning(f"Cookies file {COOKIES_FILE} not found")
+        return False
+    with open(COOKIES_FILE, 'r') as f:
+        content = f.read()
+        if 'youtube.com' not in content and 'google.com' not in content:
+            logger.warning(f"Cookies file {COOKIES_FILE} does not contain YouTube/Google cookies")
+            return False
+    logger.info(f"Valid cookies file found: {COOKIES_FILE}")
+    return True
 
 def download_with_yt_dlp(youtube_url, download_id):
     """Download audio using system yt-dlp"""
@@ -51,6 +72,11 @@ def download_with_yt_dlp(youtube_url, download_id):
             'filename': None
         }
 
+        # Check cookies file
+        use_cookies = validate_cookies_file()
+        if not use_cookies:
+            logger.warning("Proceeding without cookies due to invalid or missing cookies file")
+
         # Use yt-dlp to download the audio
         command = [
             YT_DLP_CMD,
@@ -60,8 +86,20 @@ def download_with_yt_dlp(youtube_url, download_id):
             '--newline',  # Get progress updates per line
             '--progress',  # Show progress
             '-o', output_template,
-            youtube_url
+            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',  # Modern user agent
         ]
+
+        # Add cookies if valid
+        if use_cookies:
+            command.extend(['--cookies', COOKIES_FILE])
+            logger.info(f"Using cookies file: {COOKIES_FILE}")
+
+        # Add proxy if configured
+        if PROXY:
+            command.extend(['--proxy', PROXY])
+            logger.info(f"Using proxy: {PROXY}")
+
+        command.append(youtube_url)
         logger.info(f"Running yt-dlp command: {' '.join(command)}")
 
         # Run the command
@@ -75,6 +113,7 @@ def download_with_yt_dlp(youtube_url, download_id):
         )
 
         # Process output in real-time
+        stderr_output = []
         for line in process.stdout:
             line = line.strip()
             logger.debug(f"yt-dlp stdout: {line}")
@@ -89,17 +128,33 @@ def download_with_yt_dlp(youtube_url, download_id):
                         download_status[download_id]['message'] = f"Downloading... {percent:.1f}%"
                     except Exception as e:
                         logger.warning(f"Failed to parse progress: {e}")
+            # Collect stderr in real-time
+            if process.stderr:
+                stderr_line = process.stderr.readline().strip()
+                if stderr_line:
+                    stderr_output.append(stderr_line)
 
         # Wait for process to complete
         return_code = process.wait()
         if return_code != 0:
-            error = process.stderr.read()
+            error = '\n'.join(stderr_output) if stderr_output else "Unknown error"
             logger.error(f"yt-dlp failed with return code {return_code}")
             logger.error(f"yt-dlp stderr: {error}")
-            download_status[download_id] = {
-                'status': 'error',
-                'message': f"Download failed: {error}"
-            }
+            if "Sign in to confirm" in error:
+                download_status[download_id] = {
+                    'status': 'error',
+                    'message': "This video requires authentication. Please ensure a valid cookies file is provided or try a different video."
+                }
+            elif "Proxy" in error or "Connection" in error:
+                download_status[download_id] = {
+                    'status': 'error',
+                    'message': f"Proxy error: {error}. Please check proxy settings or disable the proxy."
+                }
+            else:
+                download_status[download_id] = {
+                    'status': 'error',
+                    'message': f"Download failed: {error}"
+                }
             return None
 
         # Find the output file (should be the only file starting with file_id)
@@ -117,10 +172,15 @@ def download_with_yt_dlp(youtube_url, download_id):
             return None
 
         # Get the video title from yt-dlp
-        title_command = [YT_DLP_CMD, '--get-title', youtube_url]
+        title_command = [YT_DLP_CMD, '--get-title']
+        if use_cookies:
+            title_command.extend(['--cookies', COOKIES_FILE])
+        if PROXY:
+            title_command.extend(['--proxy', PROXY])
+        title_command.append(youtube_url)
         title_result = subprocess.run(title_command,
-                                      capture_output=True,
-                                      text=True)
+                                     capture_output=True,
+                                     text=True)
         if title_result.returncode == 0:
             video_title = sanitize_filename(title_result.stdout.strip())
             # Rename the file to include the video title
@@ -152,7 +212,6 @@ def download_with_yt_dlp(youtube_url, download_id):
         }
         return None
 
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -183,7 +242,6 @@ def index():
 
     return render_template('index.html')
 
-
 @app.route('/progress/<download_id>')
 def download_progress(download_id):
     if download_id not in download_status:
@@ -193,13 +251,11 @@ def download_progress(download_id):
                          download_id=download_id,
                          status=status)
 
-
 @app.route('/api/progress/<download_id>')
 def api_progress(download_id):
     if download_id not in download_status:
         return jsonify({'error': 'Invalid download ID'}), 404
     return jsonify(download_status[download_id])
-
 
 @app.route('/download/<filename>')
 def download(filename):
@@ -221,11 +277,9 @@ def download(filename):
     else:
         return render_template('index.html', error="File not found. Please try again.")
 
-
 @app.route('/about')
 def about():
     return render_template('about.html')
-
 
 def cleanup_temp_files():
     """Clean up old files in temp directory"""
@@ -241,7 +295,6 @@ def cleanup_temp_files():
     except Exception as e:
         logger.error(f"Error cleaning up temp directory: {e}")
 
-
 if __name__ == '__main__':
     # Check for yt-dlp at startup
     try:
@@ -253,6 +306,10 @@ if __name__ == '__main__':
         logger.info(f"Using yt-dlp version: {version.stdout.strip()}")
     except Exception as e:
         logger.error("yt-dlp not found. Please install it with: sudo apt install yt-dlp")
+
+    # Check cookies file at startup
+    if not validate_cookies_file():
+        logger.error(f"Invalid or missing cookies file: {COOKIES_FILE}. Downloads may fail for restricted videos.")
 
     # Register cleanup function
     import atexit
