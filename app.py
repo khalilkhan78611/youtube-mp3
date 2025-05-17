@@ -1,155 +1,238 @@
+import os
 import random
+import re
+import shutil
+import subprocess
 import time
+import uuid
+from pathvalidate import sanitize_filename
+from typing import Dict, Optional, List
 
-# Settings
+# Configure logging
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Global settings
 YT_DLP_CMD = "yt-dlp"
 TEMP_DIR = "temp_downloads"
-if not os.path.exists(TEMP_DIR):
-    os.makedirs(TEMP_DIR)
+COOKIES_FILE = "cookies.txt"
+os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Optional: Set proxy via environment variable
-PROXY = os.environ.get('YT_DLP_PROXY', None)
+# Configuration
+class Config:
+    DELAY_RANGE = (5, 15)  # Random delay between downloads (seconds)
+    MAX_RETRIES = 3        # Max retries for failed downloads
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    PROXY = os.environ.get('YT_DLP_PROXY')  # Optional proxy
 
-# Delay settings (in seconds)
-DELAY_MIN = 2
-DELAY_MAX = 5
+# Global download tracking
+download_status: Dict[str, dict] = {}
 
-def download_with_yt_dlp(youtube_url, download_id):
-    try:
-        # Add random delay to prevent rate limiting
-        delay = random.uniform(DELAY_MIN, DELAY_MAX)
-        logger.info(f"Sleeping for {delay:.2f} seconds to avoid rate limits")
-        time.sleep(delay)
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename by removing invalid characters."""
+    return re.sub(r'[\\/*?:"<>|]', "", filename).strip()
 
-        file_id = str(uuid.uuid4())
-        output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
+class YouTubeDownloader:
+    def __init__(self):
+        self.cookies_available = os.path.exists(COOKIES_FILE)
+        if self.cookies_available:
+            logger.info("Cookies file found - will use for authentication")
+        else:
+            logger.warning("No cookies.txt file - age-restricted videos may fail")
 
-        # Initialize progress tracking
-        download_status[download_id] = {
-            'status': 'downloading',
-            'progress': 0,
-            'message': 'Starting download...',
-            'filename': None
-        }
-
-        # Build yt-dlp command with modern user-agent
+    def _build_command(self, url: str, output_template: str) -> List[str]:
+        """Build the yt-dlp command with all options."""
         command = [
             YT_DLP_CMD,
-            '-x', '--audio-format', 'mp3', '--audio-quality', '0',
-            '--newline', '--progress',
+            '--newline',
+            '--progress',
+            '--no-warnings',
+            '--audio-format', 'mp3',
+            '--audio-quality', '0',
+            '--extract-audio',
+            '--user-agent', Config.USER_AGENT,
             '-o', output_template,
-            '--user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
         ]
 
-        # Add proxy if configured
-        if PROXY:
-            command.extend(['--proxy', PROXY])
-            logger.info(f"Using proxy: {PROXY}")
+        if self.cookies_available:
+            command.extend(['--cookies', COOKIES_FILE])
 
-        command.append(youtube_url)
-        logger.info(f"Running yt-dlp command: {' '.join(command)}")
+        if Config.PROXY:
+            command.extend(['--proxy', Config.PROXY])
 
-        # Run the command
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            universal_newlines=True,
-            bufsize=1
-        )
+        command.extend([
+            '--force-ipv4',  # Avoid IPv6 if problematic
+            '--socket-timeout', '30',  # 30 second timeout
+            '--retries', '10',  # Retry on failures
+            url
+        ])
 
-        stderr_output = []
+        return command
 
-        for line in process.stdout:
-            line = line.strip()
-            logger.debug(f"yt-dlp stdout: {line}")
+    def _handle_error(self, download_id: str, error_msg: str) -> None:
+        """Handle different types of download errors."""
+        error_lower = error_msg.lower()
+        
+        if any(msg in error_lower for msg in ["sign in", "robot", "captcha"]):
+            message = "YouTube requires CAPTCHA verification (add cookies.txt)"
+        elif "429" in error_msg or "too many requests" in error_lower:
+            message = "Rate limited - try again later with different IP"
+        elif "unavailable" in error_lower:
+            message = "Video is unavailable/private"
+        elif "age restricted" in error_lower:
+            message = "Age-restricted video (requires cookies)"
+        else:
+            message = "Download failed"
+
+        download_status[download_id] = {
+            'status': 'error',
+            'message': message,
+            'error': error_msg,
+            'progress': 0
+        }
+
+    def _get_video_title(self, url: str) -> Optional[str]:
+        """Get video title without downloading."""
+        try:
+            cmd = [YT_DLP_CMD, '--get-title', '--no-warnings', url]
+            if self.cookies_available:
+                cmd.extend(['--cookies', COOKIES_FILE])
+            
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=15
+            )
+            return sanitize_filename(result.stdout.strip()) if result.returncode == 0 else None
+        except Exception as e:
+            logger.warning(f"Couldn't get video title: {str(e)}")
+            return None
+
+    def _process_output_line(self, line: str, download_id: str) -> None:
+        """Parse yt-dlp output for progress updates."""
+        try:
             if '[download]' in line:
                 if 'Destination:' in line:
                     download_status[download_id]['message'] = 'Processing...'
                 elif '%' in line:
-                    try:
-                        percent = float(line.split('%')[0].strip().split()[-1])
-                        download_status[download_id]['progress'] = percent
-                        download_status[download_id]['message'] = f"Downloading... {percent:.1f}%"
-                    except Exception as e:
-                        logger.warning(f"Failed to parse progress: {e}")
+                    percent = float(line.split('%')[0].strip().split()[-1])
+                    download_status[download_id].update({
+                        'progress': percent,
+                        'message': f"Downloading... {percent:.1f}%"
+                    })
+        except Exception as e:
+            logger.debug(f"Progress parsing error: {str(e)}")
 
-            # Read stderr in real-time
-            stderr_line = process.stderr.readline().strip()
-            if stderr_line:
-                stderr_output.append(stderr_line)
+    def download(self, youtube_url: str, download_id: str) -> Optional[str]:
+        """Main download method with retry logic."""
+        for attempt in range(Config.MAX_RETRIES):
+            try:
+                # Random delay between attempts
+                if attempt > 0:
+                    delay = random.uniform(*Config.DELAY_RANGE)
+                    logger.info(f"Retry #{attempt + 1} in {delay:.1f} seconds...")
+                    time.sleep(delay)
 
-        return_code = process.wait()
-
-        if return_code != 0:
-            error = '\n'.join(stderr_output) if stderr_output else "Unknown error"
-            logger.error(f"yt-dlp failed with return code {return_code}")
-            logger.error(f"yt-dlp stderr: {error}")
-
-            if "Sign in to confirm" in error:
+                # Initialize tracking
+                file_id = str(uuid.uuid4())
+                output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
+                
                 download_status[download_id] = {
-                    'status': 'error',
-                    'message': "This video requires authentication and cannot be downloaded without cookies."
+                    'status': 'downloading',
+                    'progress': 0,
+                    'message': 'Starting download...',
+                    'filename': None,
+                    'attempt': attempt + 1
                 }
-            elif "429" in error or "Too Many Requests" in error:
-                download_status[download_id] = {
-                    'status': 'error',
-                    'message': "Too many requests. Please try again later."
-                }
-            else:
-                download_status[download_id] = {
-                    'status': 'error',
-                    'message': f"Download failed: {error}"
-                }
-            return None
 
-        # Find output file
-        output_file = None
-        for file in os.listdir(TEMP_DIR):
-            if file.startswith(file_id):
-                output_file = os.path.join(TEMP_DIR, file)
-                break
+                # Build and run command
+                command = self._build_command(youtube_url, output_template)
+                logger.debug(f"Running command: {' '.join(command)}")
 
-        if not output_file:
-            download_status[download_id] = {
-                'status': 'error',
-                'message': "Could not find downloaded file"
-            }
-            return None
+                process = subprocess.Popen(
+                    command,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    universal_newlines=True
+                )
 
-        # Get title (no cookies)
-        title_command = [YT_DLP_CMD, '--get-title', youtube_url]
-        if PROXY:
-            title_command.extend(['--proxy', PROXY])
+                # Process output in real-time
+                stderr_lines = []
+                while True:
+                    output_line = process.stdout.readline()
+                    if output_line == '' and process.poll() is not None:
+                        break
+                    if output_line:
+                        self._process_output_line(output_line.strip(), download_id)
 
-        title_result = subprocess.run(title_command, capture_output=True, text=True)
+                    # Capture stderr
+                    stderr_line = process.stderr.readline()
+                    if stderr_line:
+                        stderr_lines.append(stderr_line.strip())
 
-        if title_result.returncode == 0:
-            video_title = sanitize_filename(title_result.stdout.strip())
-            mp3_file = os.path.join(TEMP_DIR, f"{video_title}.mp3")
-            shutil.move(output_file, mp3_file)
-            download_status[download_id] = {
-                'status': 'completed',
-                'progress': 100,
-                'message': 'Download complete!',
-                'filename': f"{video_title}.mp3"
-            }
-            return video_title
-        else:
-            filename = os.path.basename(output_file).split('.')[0] + '.mp3'
-            download_status[download_id] = {
-                'status': 'completed',
-                'progress': 100,
-                'message': 'Download complete!',
-                'filename': filename
-            }
-            return filename
+                # Check result
+                if process.returncode != 0:
+                    error_msg = '\n'.join(stderr_lines) or f"Exit code {process.returncode}"
+                    self._handle_error(download_id, error_msg)
+                    continue  # Will retry if attempts remain
 
-    except Exception as e:
-        logger.error(f"Error in download_with_yt_dlp: {str(e)}")
-        download_status[download_id] = {
-            'status': 'error',
-            'message': f"Error: {str(e)}"
-        }
+                # Find and rename downloaded file
+                downloaded_files = [
+                    f for f in os.listdir(TEMP_DIR) 
+                    if f.startswith(file_id) and f.endswith('.mp3')
+                ]
+
+                if not downloaded_files:
+                    self._handle_error(download_id, "Downloaded file not found")
+                    continue
+
+                temp_file = os.path.join(TEMP_DIR, downloaded_files[0])
+                video_title = self._get_video_title(youtube_url) or f"audio_{file_id[:8]}"
+                final_filename = f"{sanitize_filename(video_title)}.mp3"
+                final_path = os.path.join(TEMP_DIR, final_filename)
+
+                try:
+                    shutil.move(temp_file, final_path)
+                    download_status[download_id] = {
+                        'status': 'completed',
+                        'progress': 100,
+                        'message': 'Download complete!',
+                        'filename': final_filename,
+                        'filepath': final_path
+                    }
+                    return final_filename
+                except OSError as e:
+                    self._handle_error(download_id, f"File move failed: {str(e)}")
+                    continue
+
+            except Exception as e:
+                logger.error(f"Attempt {attempt + 1} failed: {str(e)}", exc_info=True)
+                self._handle_error(download_id, f"Unexpected error: {str(e)}")
+
+        # All attempts failed
+        logger.error(f"All {Config.MAX_RETRIES} attempts failed for {youtube_url}")
         return None
+
+# Example usage
+if __name__ == "__main__":
+    downloader = YouTubeDownloader()
+    
+    # Test download
+    test_url = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    download_id = "test_download_1"
+    
+    result = downloader.download(test_url, download_id)
+    if result:
+        print(f"Successfully downloaded: {result}")
+        print(f"Final status: {download_status[download_id]}")
+    else:
+        print("Download failed")
+        print(f"Error details: {download_status[download_id].get('error')}")
