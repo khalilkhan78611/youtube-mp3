@@ -54,7 +54,7 @@ def is_valid_youtube_url(url):
         return False
 
 def download_with_yt_dlp(youtube_url, download_id, cookies_path=None):
-    """Download audio using system yt-dlp"""
+    """Download audio using system yt-dlp with cookies.txt"""
     try:
         file_id = str(uuid.uuid4())
         output_template = os.path.join(TEMP_DIR, f"{file_id}.%(ext)s")
@@ -66,23 +66,30 @@ def download_with_yt_dlp(youtube_url, download_id, cookies_path=None):
             'filename': None
         }
 
+        # Initialize yt-dlp command
         command = [
             YT_DLP_CMD,
-            '-x',
+            '-x',  # Extract audio
             '--audio-format', 'mp3',
-            '--audio-quality', '0',
-            '--newline',
-            '--progress',
+            '--audio-quality', '0',  # Best quality
+            '--newline',  # Get progress updates
+            '--progress',  # Show progress
             '-o', output_template,
             youtube_url
         ]
 
-        # Use static cookies.txt if no user-uploaded cookies provided
+        # Use user-uploaded cookies if provided, else fall back to config/cookies.txt
+        # NEW: Explicitly include --cookies in the command
         static_cookies = os.path.join(CONFIG_DIR, "cookies.txt")
         if cookies_path and os.path.exists(cookies_path):
             command.extend(['--cookies', cookies_path])
+            logger.info(f"Using user-uploaded cookies: {cookies_path}")
         elif os.path.exists(static_cookies):
             command.extend(['--cookies', static_cookies])
+            logger.info(f"Using static cookies: {static_cookies}")
+        else:
+            logger.warning("No cookies.txt found; proceeding without cookies")
+            download_status[download_id]['message'] = 'No cookies provided, restricted content may fail'
 
         logger.info(f"Running yt-dlp command: {' '.join(command)}")
 
@@ -133,6 +140,7 @@ def download_with_yt_dlp(youtube_url, download_id, cookies_path=None):
             }
             return None
 
+        # Fetch video title with same cookies
         title_command = [YT_DLP_CMD, '--get-title']
         if cookies_path and os.path.exists(cookies_path):
             title_command.extend(['--cookies', cookies_path])
@@ -178,7 +186,7 @@ def download_with_yt_dlp(youtube_url, download_id, cookies_path=None):
         if cookies_path and os.path.exists(cookies_path):
             try:
                 os.remove(cookies_path)
-                logger.info(f"Cleaned up cookies file: {cookies_path}")
+                logger.info(f"Cleaned up user-uploaded cookies: {cookies_path}")
             except Exception as e:
                 logger.error(f"Error cleaning up cookies file: {e}")
 
@@ -208,7 +216,7 @@ def index():
                 cookies_path = os.path.join(TEMP_DIR, cookies_filename)
                 cookies_file.save(cookies_path)
                 os.chmod(cookies_path, 0o600)  # Restrict access
-                logger.info(f"Saved user cookies to {cookies_path}")
+                logger.info(f"Saved user-uploaded cookies to {cookies_path}")
 
             thread = threading.Thread(
                 target=download_with_yt_dlp,
@@ -284,6 +292,15 @@ def cleanup_temp_files():
     except Exception as e:
         logger.error(f"Error cleaning up temp directory: {e}")
 
+# Write cookies.txt from environment variable if provided (for Coolify)
+static_cookies = os.path.join(CONFIG_DIR, "cookies.txt")
+cookies_content = os.environ.get('COOKIES_CONTENT')
+if cookies_content and not os.path.exists(static_cookies):
+    with open(static_cookies, 'w') as f:
+        f.write(cookies_content)
+    os.chmod(static_cookies, 0o600)
+    logger.info("Created cookies.txt from COOKIES_CONTENT")
+
 if __name__ == '__main__':
     # Check for yt-dlp at startup
     try:
@@ -297,7 +314,6 @@ if __name__ == '__main__':
         logger.error("yt-dlp not found. Please install it with: sudo apt install yt-dlp")
 
     # Ensure cookies.txt has correct permissions if it exists
-    static_cookies = os.path.join(CONFIG_DIR, "cookies.txt")
     if os.path.exists(static_cookies):
         os.chmod(static_cookies, 0o600)
         logger.info("Set permissions for cookies.txt to 600")
@@ -309,18 +325,20 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001, debug=True)
 
 # SECURITY NOTES:
-# 1. Add config/cookies.txt to .gitignore to avoid committing sensitive data:
+# 1. config/cookies.txt is in .gitignore to avoid committing sensitive data:
 #    echo "config/cookies.txt" >> .gitignore
-# 2. Alternatively, use git-secret to encrypt cookies.txt:
+# 2. For GitHub repo, use git-secret to encrypt cookies.txt if needed:
 #    git secret init
 #    git secret tell your.email@example.com
 #    git secret add config/cookies.txt
 #    git secret hide
-# 3. Configure web server to block access to config/:
+# 3. For Coolify, provide cookies.txt via volume mount or COOKIES_CONTENT env var:
+#    Volume: /path/to/cookies.txt -> /app/config/cookies.txt
+#    Env: COOKIES_CONTENT with contents of cookies.txt
+# 4. Configure web server to block access to config/ and temp_downloads/:
 #    Nginx: location /config/ { deny all; return 403; }
 #    Apache: <Directory "/path/to/config"> Deny from all </Directory>
-# 4. Ensure temp_downloads/ and config/ have chmod 700, and files have chmod 600.
-# 5. Run setup.sh after cloning to enforce permissions:
+# 5. Ensure directories (chmod 700) and files (chmod 600) have restrictive permissions:
 #    # setup.sh
 #    chmod 700 temp_downloads config
 #    chmod 600 config/cookies.txt
