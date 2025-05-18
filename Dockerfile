@@ -1,7 +1,7 @@
 FROM python:3.9-slim
 
 # Install curl and ffmpeg (required for yt_dlp)
-RUN apt-get update && apt-get install -y wget ffmpeg mc && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl ffmpeg mc && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -21,8 +21,6 @@ COPY favicon.ico /app/
 COPY apple-touch-icon.png /app/
 COPY site.webmanifest /app/
 # Expose port 5001 (your app's port)
-RUN chmod 700 temp_downloads config && \
-    chmod 600 config/cookies.txt || true
 EXPOSE 5001
 
 # Define health check for Coolify
