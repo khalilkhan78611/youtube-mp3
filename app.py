@@ -62,6 +62,11 @@ def download_with_yt_dlp(youtube_url, download_id):
             '-o', output_template,
             youtube_url
         ]
+          # Include cookies.txt if present
+        cookies_file = os.path.join(app.root_path, 'cookies.txt')
+        if os.path.exists(cookies_file):
+            command.extend(['--cookies', cookies_file])
+            logger.info("Using cookies.txt for download")
         logger.info(f"Running yt-dlp command: {' '.join(command)}")
 
         # Run the command
