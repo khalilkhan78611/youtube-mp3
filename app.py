@@ -230,7 +230,9 @@ def download(filename):
 @app.route('/about')
 def about():
     return render_template('about.html')
-
+@app.route('/health')
+def health():
+    return 'OK', 200
 
 def cleanup_temp_files():
     """Clean up old files in temp directory"""
